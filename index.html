@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KvK Appointments</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:16px;color:#222}
+.card{max-width:640px;margin:0 auto;background:#fff;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+h1{margin:0 0 16px;font-size:24px}
+.lang{display:block;width:100%;margin:10px 0;padding:16px;font-size:18px;color:#fff;background:#4285f4;border:0;border-radius:8px;cursor:pointer}
+.field{margin:18px 0;padding:6px;border:2px solid transparent;border-radius:8px}
+.field.bad{border-color:#d33;background:#fff6f6}
+.lbl{display:block;font-weight:bold;margin-bottom:6px}
+.pre{white-space:pre-line}
+.hint{font-size:13px;color:#777;margin:2px 0 6px}
+.field input[type=text]{width:100%;box-sizing:border-box;padding:10px;font-size:16px;border:1px solid #bbb;border-radius:6px}
+.opt{display:block;margin:6px 0}
+.icon{display:block;height:56px;margin-bottom:6px}
+.block{margin:8px 0;padding:8px 12px;border-inline-start:4px solid #4285f4;background:#f8faff;border-radius:6px}
+.slots{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+@media (max-width:420px){.slots{grid-template-columns:repeat(3,1fr)}}
+.slot{display:block;padding:6px 4px;border:1px solid #ccc;border-radius:6px;font-size:14px;cursor:pointer}
+.slot.on{background:#e3eeff;border-color:#4285f4}
+button.send{margin-top:20px;width:100%;padding:14px;font-size:17px;color:#fff;background:#188038;border:0;border-radius:8px;cursor:pointer}
+button.send:disabled{background:#8bc4a0}
+#msg{margin-top:14px;padding:12px;border-radius:6px;display:none}
+.err{background:#fde8e8;color:#a11}.ok{background:#e6f4ea;color:#136b2d}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ---------- CONFIGURAZIONE ----------
+var SCRIPT_URL = "/.netlify/functions/api";
+// Icone facoltative: file caricati nella stessa cartella, ad esempio "truegold.png". "" = nessuna icona
+var ICONS = { truegold: "", dust: "", tempered: "" };
+
+// ---------- BASE ----------
+var D = null;
+var app = document.getElementById("app");
+
+function h(tag, cls, txt) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (txt != null) e.textContent = txt;
+  return e;
+}
+
+function loadConfig() {
+  app.innerHTML = "";
+  var card = h("div", "card");
+  card.appendChild(h("h1", "", "Loading..."));
+  app.appendChild(card);
+  fetch(SCRIPT_URL)
+    .then(function (r) { return r.json(); })
+    .then(function (cfg) { D = cfg; showLanguages(); })
+    .catch(function () {
+      card.innerHTML = "";
+      card.appendChild(h("h1", "", "Connection error"));
+      var b = h("button", "lang", "Retry");
+      b.onclick = loadConfig;
+      card.appendChild(b);
+    });
+}
+
+function showLanguages() {
+  document.documentElement.dir = "ltr";
+  app.innerHTML = "";
+  var card = h("div", "card");
+  card.appendChild(h("h1", "", "Please select your language / Por favor seleccione su idioma"));
+  Object.keys(D.tr).forEach(function (key) {
+    var b = h("button", "lang", D.tr[key].name);
+    b.onclick = function () { build(key); window.scrollTo(0, 0); };
+    card.appendChild(b);
+  });
+  app.appendChild(card);
+}
+
+// ---------- MODULO ----------
+function build(key) {
+  var t = D.tr[key], u = D.ui[key];
+  document.documentElement.dir = u.dir;
+  app.innerHTML = "";
+  var card = h("div", "card");
+  app.appendChild(card);
+  card.appendChild(h("h1", "", t.name));
+  var items = [];
+  function always() { return true; }
+  function add(w, active, ok) { items.push({ w: w, active: active, ok: ok }); }
+
+  function field(parent, label, help) {
+    var w = h("div", "field");
+    w.appendChild(h("label", "lbl pre", label));
+    if (help) w.appendChild(h("div", "hint pre", help));
+    parent.appendChild(w);
+    return w;
+  }
+  function textInput(parent, label, help, numeric, icon) {
+    var w = field(parent, label, help);
+    if (icon) { var img = h("img", "icon"); img.src = icon; w.insertBefore(img, w.firstChild); }
+    var inp = document.createElement("input");
+    inp.type = "text";
+    if (numeric) inp.setAttribute("inputmode", "decimal");
+    w.appendChild(inp);
+    return { w: w, inp: inp };
+  }
+  function checked(name) {
+    var e = document.querySelector("input[name='" + name + "']:checked");
+    return e ? e.value : "";
+  }
+  function yesNo(parent, label, name) {
+    var w = field(parent, label);
+    [["Yes", t.yes], ["No", t.no]].forEach(function (p) {
+      var lab = h("label", "opt");
+      var r = document.createElement("input");
+      r.type = "radio"; r.name = name; r.value = p[0];
+      lab.appendChild(r);
+      lab.appendChild(document.createTextNode(" " + p[1]));
+      w.appendChild(lab);
+    });
+    return w;
+  }
+  function slotsField(parent, label) {
+    var w = field(parent, label);
+    var grid = h("div", "slots"), boxes = [];
+    var cnt = h("div", "hint");
+    D.slots.forEach(function (s) {
+      var lab = h("label", "slot");
+      var cb = document.createElement("input");
+      cb.type = "checkbox"; cb.value = s;
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(" " + s));
+      grid.appendChild(lab);
+      boxes.push(cb);
+      cb.addEventListener("change", update);
+    });
+    function values() { return boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }); }
+    function update() {
+      cnt.textContent = u.selected + ": " + values().length + " / " + D.min;
+      boxes.forEach(function (b) { b.parentNode.className = b.checked ? "slot on" : "slot"; });
+    }
+    w.appendChild(grid); w.appendChild(cnt); update();
+    return { w: w, values: values };
+  }
+  function numField(parent, label, help, decimal, icon, blockActive) {
+    var f = textInput(parent, label, (help ? help + "\n" : "") + u.numbers, true, icon);
+    var rx = decimal ? /^[0-9]+([.,][0-9]+)?$/ : /^[0-9]+$/;
+    add(f.w, blockActive, function () { return rx.test(f.inp.value.trim()); });
+    return f;
+  }
+  function block(yn) {
+    var b = h("div", "block");
+    b.style.display = "none";
+    yn.addEventListener("change", function () { b.style.display = checked(yn.dataset.n) === "Yes" ? "block" : "none"; });
+    return b;
+  }
+
+  // --- Dati principali ---
+  var name = textInput(card, t.q1);
+  add(name.w, always, function () { var v = name.inp.value.trim(); return v.length >= 1 && v.length <= 50; });
+
+  var aw = field(card, t.q2);
+  D.tags.concat(["__other"]).forEach(function (tag) {
+    var lab = h("label", "opt");
+    var r = document.createElement("input");
+    r.type = "radio"; r.name = "tag"; r.value = tag;
+    lab.appendChild(r);
+    lab.appendChild(document.createTextNode(" " + (tag === "__other" ? u.other : tag)));
+    aw.appendChild(lab);
+  });
+  var oth = document.createElement("input");
+  oth.type = "text"; oth.maxLength = 20; oth.placeholder = u.otherHint; oth.style.display = "none";
+  aw.appendChild(oth);
+  aw.addEventListener("change", function () { oth.style.display = checked("tag") === "__other" ? "block" : "none"; });
+  add(aw, always, function () {
+    var v = checked("tag");
+    if (!v) return false;
+    return v !== "__other" || oth.value.trim().length >= 1;
+  });
+  function tagValue() { var v = checked("tag"); return v === "__other" ? oth.value.trim() : v; }
+
+  var pid = textInput(card, t.q3, u.numbers, true);
+  add(pid.w, always, function () { return /^[0-9]+$/.test(pid.inp.value.trim()); });
+
+  // --- Costruzione ---
+  var cw = yesNo(card, t.q4, "c"); cw.dataset.n = "c";
+  add(cw, always, function () { return checked("c") !== ""; });
+  var cb = block(cw); card.appendChild(cb);
+  function cAct() { return checked("c") === "Yes"; }
+  var g = numField(cb, t.q5, "", false, ICONS.truegold, cAct);
+  var hh = numField(cb, t.q6, "", false, ICONS.tempered, cAct);
+  var ii = numField(cb, t.q7, t.q7_help, true, null, cAct);
+  var cs = slotsField(cb, t.q8);
+  add(cs.w, cAct, function () { return cs.values().length >= D.min; });
+
+  // --- Ricerca ---
+  var rw = yesNo(card, t.q9, "r"); rw.dataset.n = "r";
+  add(rw, always, function () { return checked("r") !== ""; });
+  var rb = block(rw); card.appendChild(rb);
+  function rAct() { return checked("r") === "Yes"; }
+  var l = numField(rb, t.q10, "", false, ICONS.dust, rAct);
+  var m = numField(rb, t.q11, "", false, ICONS.tempered, rAct);
+  var n = numField(rb, t.q12, t.q12_help, true, null, rAct);
+  var rs = slotsField(rb, t.q13);
+  add(rs.w, rAct, function () { return rs.values().length >= D.min; });
+
+  // --- Truppe ---
+  var tw = yesNo(card, t.q14, "tr"); tw.dataset.n = "tr";
+  add(tw, always, function () { return checked("tr") !== ""; });
+  var tb = block(tw); card.appendChild(tb);
+  function tAct() { return checked("tr") === "Yes"; }
+  var q = numField(tb, t.q15, t.q15_help, true, null, tAct);
+  var pw = yesNo(tb, t.q16, "pm");
+  add(pw, tAct, function () { return checked("pm") !== ""; });
+  var ts = slotsField(tb, t.q17);
+  add(ts.w, tAct, function () { return ts.values().length >= D.min; });
+
+  // --- Invio ---
+  var btn = h("button", "send", u.submit);
+  btn.type = "button";
+  var msg = h("div"); msg.id = "msg";
+  card.appendChild(btn); card.appendChild(msg);
+  function show(text, cls) { msg.textContent = text; msg.className = cls; msg.style.display = "block"; }
+
+  btn.onclick = function () {
+    var firstBad = null;
+    items.forEach(function (it) {
+      var isBad = it.active() && !it.ok();
+      it.w.classList.toggle("bad", isBad);
+      if (isBad && !firstBad) firstBad = it.w;
+    });
+    if (firstBad) {
+      show(u.check, "err");
+      firstBad.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    var data = {
+      name: name.inp.value, tag: tagValue(), id: pid.inp.value,
+      c: checked("c"), g: g.inp.value, h: hh.inp.value, i: ii.inp.value, ct: cs.values(),
+      r: checked("r"), l: l.inp.value, m: m.inp.value, n: n.inp.value, rt: rs.values(),
+      tr: checked("tr"), q: q.inp.value, pm: checked("pm"), tt: ts.values()
+    };
+    btn.disabled = true; btn.textContent = u.sending; msg.style.display = "none";
+
+    fetch(SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ lang: key, data: data })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.ok) {
+          card.innerHTML = "";
+          card.appendChild(h("h1", "", t.name));
+          var ok = h("div", "ok", u.thanks);
+          ok.style.padding = "12px"; ok.style.borderRadius = "6px";
+          card.appendChild(ok);
+          window.scrollTo(0, 0);
+        } else {
+          btn.disabled = false; btn.textContent = u.submit;
+          show(u.check + (res && res.error ? " (" + res.error + ")" : ""), "err");
+        }
+      })
+      .catch(function () {
+        btn.disabled = false; btn.textContent = u.submit;
+        show(u.conn, "err");
+      });
+  };
+}
+
+loadConfig();
+</script>
+</body>
+</html>
